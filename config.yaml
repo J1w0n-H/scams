@@ -1,0 +1,18 @@
+keywords:
+  - "스캠"
+interval_minutes: 10
+
+missyusa:
+  search_url: "https://www.missyusa.com/mainpage/content/MainSearch.asp?search_section=talk&searchWord={keyword}&sortOption=date&page={page}"
+  data_path: "data/mu_posts.csv"
+  huggingface_api_key: "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"
+
+naver:
+  login_id: "jiwoney97"
+  login_pw: "Qkdtks6947**"
+  data_path: "data/gu_posts.csv"
+  chrome_path: "C:\\Program Files (x86)\\chrome-win64\\chrome.exe"
+  chromedriver_path: "C:\\Program Files\\chromedriver-win64\\chromedriver.exe"
+  clubid: "10854519"
+  menuid: ""
+  search_url: "https://cafe.naver.com/ArticleSearchList.nhn?search.clubid={clubid}&search.menuid={menuid}&search.searchBy=0&search.query={keyword}&search.page={page}" 
