@@ -16,13 +16,13 @@ import re
 
 # config 읽기
 def load_config():
-    with open('config.yaml', 'r', encoding='utf-8') as f:
+    with open('config.yaml', 'r', encoding='utf-8-sig') as f:
         return yaml.safe_load(f)
 
 def get_post_ids(data_path):
     if not os.path.exists(data_path):
         return set()
-    df = pd.read_csv(data_path, encoding='utf-8')
+    df = pd.read_csv(data_path, encoding='utf-8-sig')
     return set(df['id'].astype(str))
 
 def get_post_ids_and_contents(data_path):
@@ -31,13 +31,13 @@ def get_post_ids_and_contents(data_path):
     """
     if not os.path.exists(data_path):
         return dict()
-    df = pd.read_csv(data_path, encoding='utf-8')
+    df = pd.read_csv(data_path, encoding='utf-8-sig')
     return dict(zip(df['id'].astype(str), df['content'].fillna('')))
 
 def save_posts(posts, data_path):
     df_new = pd.DataFrame(posts)
     if os.path.exists(data_path):
-        df_old = pd.read_csv(data_path, encoding='euc-kr')
+        df_old = pd.read_csv(data_path, encoding='utf-8-sig')
         df_old.set_index('id', inplace=True)
         df_new.set_index('id', inplace=True)
         for idx, row in df_new.iterrows():
@@ -48,6 +48,16 @@ def save_posts(posts, data_path):
                 if (not old_content) and new_content:
                     for col in df_new.columns:
                         df_old.at[idx, col] = row[col]
+                # 기존 본문이 있고, 새 본문이 더 길면 업데이트
+                elif old_content and new_content and len(new_content) > len(old_content):
+                    for col in df_new.columns:
+                        df_old.at[idx, col] = row[col]
+                # 기존 본문과 새 본문이 다르고, 새 본문이 더 짧으면 합치기
+                elif old_content and new_content and old_content != new_content and len(new_content) <= len(old_content):
+                    merged_content = old_content
+                    if new_content not in old_content:
+                        merged_content += "\n" + new_content
+                    df_old.at[idx, 'content'] = merged_content
             else:
                 # 기존에 없는 id는 추가
                 df_old.loc[idx] = row
@@ -270,7 +280,7 @@ def search_in_cafe(driver, keyword):
         )
         print("[INFO] cafe_main iframe으로 전환 성공")
         # Save HTML source for debugging
-        with open("cafe_main_iframe_debug.html", "w", encoding="euc-kr", errors="replace") as f:
+        with open("cafe_main_iframe_debug.html", "w", encoding="utf-8", errors="replace") as f:
             f.write(driver.page_source)
         print("[DEBUG] Saved cafe_main_iframe_debug.html for selector inspection.")
     except TimeoutException:
@@ -445,7 +455,7 @@ def crawl_posts(config):
                         }
                         save_posts([post_data], data_path)
                         id_content_map[post_id] = content
-                        time.sleep(1)
+                        time.sleep(0.2)
                     except Exception as e:
                         print(f"[WARNING] 게시글 처리 중 오류: {e}")
                         continue
