@@ -7,6 +7,7 @@ import re
 import yaml
 import os
 import sys
+from transformers import pipeline
 
 class TextClassifier:
     def __init__(self, api_token: Optional[str] = None, config: Optional[dict] = None):
@@ -15,10 +16,13 @@ class TextClassifier:
         api_token: Hugging Face API 토큰 (선택사항)
         config: 설정 딕셔너리 (선택사항)
         """
-        self.api_token = api_token
-        # 한국어 NLI 분류를 위해 klue/roberta-large로 변경
-        self.api_url = "https://api-inference.huggingface.co/models/joeddav/xlm-roberta-large-xnli"
-        self.headers = {"Authorization": f"Bearer {api_token}"} if api_token else {}
+        # self.api_token, self.api_url, self.headers 등 API 관련 코드 제거
+        # config에서 categories/patterns 불러오는 부분은 유지
+        self.local_classifier = pipeline(
+            "zero-shot-classification",
+            model="joeddav/xlm-roberta-large-xnli",
+            device=0  # GPU 사용시 0, CPU만 있으면 -1
+        )
         
         # confidence threshold 설정 (키워드 매칭률이 이 값보다 낮으면 Transformer 사용)
         self.confidence_threshold = 0.3  # 기본값
@@ -177,7 +181,7 @@ class TextClassifier:
         method_result, method_matched, method_kw = self.classify_method(text)
         # 2단계: 하나라도 매칭 실패하면 해당 matched_*_keyword만 'API'로 기록, 값은 fallback 결과 사용
         api_result = None
-        if (type_matched == 0 or topic_matched == 0 or method_matched == 0) and use_api and self.api_token:
+        if (type_matched == 0 or topic_matched == 0 or method_matched == 0) and use_api:
             print(f"일부 카테고리 키워드 매칭 실패. 부족한 부분은 Transformer 분류기를 사용합니다.")
             api_result = self.classify_with_api(text)
         return {
@@ -191,65 +195,34 @@ class TextClassifier:
 
     def classify_with_api(self, text: str) -> Optional[dict]:
         """
-        Hugging Face API를 사용한 텍스트 분류
+        로컬 zero-shot classification을 사용한 텍스트 분류
         """
         if not text or pd.isna(text):
             return None
-        
-        # candidate_labels를 한글 설명문으로 구성
+
         type_label_map = {v: k for k, v in self.type_categories.items()}
         topic_label_map = {v: k for k, v in self.topic_categories.items()}
         method_label_map = {v: k for k, v in self.method_categories.items()}
         candidate_labels = list(self.type_categories.values()) + list(self.topic_categories.values()) + list(self.method_categories.values())
-        
-        payload = {
-            "inputs": text,
-            "parameters": {
-                "candidate_labels": candidate_labels,
-                "multi_label": False
+
+        try:
+            result = self.local_classifier(text, candidate_labels, multi_label=False)
+            labels = result.get("labels", [])
+            type_label = next((type_label_map[lbl] for lbl in labels if lbl in type_label_map), "other")
+            topic_label = next((topic_label_map[lbl] for lbl in labels if lbl in topic_label_map), "other")
+            method_label = next((method_label_map[lbl] for lbl in labels if lbl in method_label_map), "")
+            return {
+                "type": type_label,
+                "scam_topic": topic_label,
+                "scam_method": method_label
             }
-        }
-        
-        for attempt in range(2):  # 최대 2회 시도
-            try:
-                response = requests.post(
-                    self.api_url, 
-                    headers=self.headers, 
-                    json=payload,
-                    timeout=60  # 60초로 늘림
-                )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    print("API 응답:", result)
-                    # Hugging Face API는 라벨 목록을 반환하므로, 가장 높은 점수를 가진 라벨을 선택
-                    # 타입, 주제, 방법 순으로 분류하여 반환
-                    labels = result.get("labels", [])
-                    # 한글 설명문 → 코드값으로 역매핑
-                    type_label = next((type_label_map[lbl] for lbl in labels if lbl in type_label_map), "other")
-                    topic_label = next((topic_label_map[lbl] for lbl in labels if lbl in topic_label_map), "other")
-                    method_label = next((method_label_map[lbl] for lbl in labels if lbl in method_label_map), "")
-                    
-                    return {
-                        "type": type_label,
-                        "scam_topic": topic_label,
-                        "scam_method": method_label
-                    }
-                else:
-                    print(f"API 요청 실패: {response.status_code}")
-                    return None
-                    
-            except Exception as e:
-                print(f"API 호출 중 오류: {e}")
-                if attempt == 0:
-                    print("API 재시도 중...")
-                    time.sleep(2)
-                else:
-                    return {
-                        "type": "API_TIMEOUT",
-                        "scam_topic": "API_TIMEOUT",
-                        "scam_method": "API_TIMEOUT"
-                    }
+        except Exception as e:
+            print(f"로컬 모델 분류 오류: {e}")
+            return {
+                "type": "API_TIMEOUT",
+                "scam_topic": "API_TIMEOUT",
+                "scam_method": "API_TIMEOUT"
+            }
 
 def classify_with_keywords_simple(text, patterns_dict, default="other", multi=False):
     if not text or pd.isna(text):
@@ -360,7 +333,7 @@ def process_csv_file(input_file: str, output_file: str, api_token: Optional[str]
             print(f"진행률: {idx + 1}/{len(df)} ({((idx + 1)/len(df)*100):.1f}%)")
         
         # API 사용 시 요청 간격 조절
-        if use_api and api_token:
+        if use_api:
             time.sleep(0.5)  # 0.5초 대기
         
         result_row = dict(row)  # 원본 row의 모든 컬럼 포함
