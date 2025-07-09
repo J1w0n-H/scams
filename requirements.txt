@@ -2,3 +2,6 @@ requests
 beautifulsoup4
 pandas
 pyyaml 
+transformers
+torch 
+sentencepiece 
