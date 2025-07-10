@@ -1,7 +1,6 @@
 keywords:
   - "스캠"
 interval_minutes: 10
-huggingface_api_key: "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"
 
 text_classification:
   type:
@@ -10,7 +9,7 @@ text_classification:
       question_is_scam_confirmed_action: "사기임을 확신한 후 대응법을 묻는 질문"
       warning_experience: "직접 피해 경험 후 경고 목적"
       warning_broadcast: "영상/뉴스 등 외부 자료 공유 경고"
-      unclear: "판단이 불가능한 경우 (정보 부족, 맥락 모호 등)"
+      unclear: "스캠과 관련이 있는지 불분명한 경우"
     patterns:
       question_is_scam_unsure:
         - "스캠인가요"
@@ -95,7 +94,7 @@ text_classification:
       romance_scam: "감정/연애/결혼을 이용한 사기"
       tuition_scam: "등록금/학비 송금 요구 사기"
       account_theft: "계정 탈취 및 인증번호 유도 사기"
-      unknown: "판단이 불가능하거나 새로운 유형"
+      unknown: "스캠과 관련이 있지만 구체적인 유형을 분류할 수 없는 경우"
     patterns:
       delivery_scam:
         - "택배"
@@ -173,24 +172,16 @@ text_classification:
         - "verification"
         - "로그인 요청"
         - "구글 인증"
-      unknown:
-        - "기타"
-  scam_method:
-    categories:
-      sms_text: "문자 메시지를 통한 접근"
-      phone_call: "전화 통화를 통한 접근"
-      email: "이메일을 통한 접근"
-      chat_app: "카카오톡, WhatsApp 등 메신저 앱 기반"
-      sns_platform: "페이스북/인스타 등 SNS 상 접촉"
-      link_landing: "URL 링크 클릭 유도로 시작된 사기"
-      in_person: "직접 대면하여 시도된 사기"
-      unknown: "접촉 경로가 불분명하거나 정보 부족"
+      unknown: "스캠과 관련이 있지만 구체적인 접근 방법을 분류할 수 없는 경우"
     patterns:
       sms_text:
         - "문자"
         - "sms"
+        - "메세지"
+        - "text messsage"
         - "메시지"
         - "문자메시지"
+        - "텍스트 메세지"
       phone_call:
         - "전화"
         - "통화"
@@ -236,11 +227,5 @@ missyusa:
   data_path: "data/mu_posts.csv"
 
 naver:
-  login_id: "jiwoney97"
-  login_pw: "Qkdtks6947**"
   data_path: "data/gu_posts.csv"
-  chrome_path: "C:\\Program Files (x86)\\chrome-win64\\chrome.exe"
-  chromedriver_path: "C:\\Program Files\\chromedriver-win64\\chromedriver.exe"
-  clubid: "10854519"
-  menuid: ""
   search_url: "https://cafe.naver.com/ArticleSearchList.nhn?search.clubid={clubid}&search.menuid={menuid}&search.searchBy=0&search.query={keyword}&search.page={page}" 

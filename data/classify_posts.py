@@ -7,7 +7,7 @@ import re
 import yaml
 import os
 import sys
-from transformers import pipeline
+from transformers.pipelines import pipeline
 
 class TextClassifier:
     def __init__(self, api_token: Optional[str] = None, config: Optional[dict] = None):
@@ -50,90 +50,13 @@ class TextClassifier:
                 self.method_categories = tc['scam_method']['categories']
                 self.method_patterns = tc['scam_method']['patterns']
         else:
-            # 기본값 설정
-            self.type_categories = {
-                "question": "질문, 확인 요청",
-                "warning": "경고, 주의 환기", 
-                "experience": "경험 공유 (피해담/사례 등)",
-                "advice": "해결 방법, 조언",
-                "discussion": "일반적 논의, 잡담"
-            }
-            
-            # 각 카테고리에 대한 키워드 패턴
-            self.type_patterns = {
-                "question": [
-                    r"\?$", r"질문", r"궁금", r"어떻게", r"무엇", r"어디", r"언제", r"왜", r"어떤",
-                    r"help", r"question", r"how", r"what", r"where", r"when", r"why", r"which",
-                    r"도와주세요", r"알려주세요", r"확인", r"요청"
-                ],
-                "warning": [
-                    r"주의", r"경고", r"조심", r"위험", r"피해", r"사기", r"scam", r"fraud",
-                    r"warning", r"caution", r"danger", r"risk", r"주의사항", r"알림"
-                ],
-                "experience": [
-                    r"경험", r"사례", r"피해", r"당했다", r"받았다", r"겪었다", r"발생", r"발견",
-                    r"experience", r"case", r"story", r"happened", r"received", r"found",
-                    r"당했어", r"받았어", r"겪었어", r"생겼어", r"발견했어"
-                ],
-                "advice": [
-                    r"조언", r"해결", r"방법", r"팁", r"도움", r"가이드", r"해결책",
-                    r"advice", r"solution", r"method", r"tip", r"help", r"guide",
-                    r"이렇게 하세요", r"다음과 같이", r"권장", r"추천"
-                ],
-                "discussion": [
-                    r"토론", r"논의", r"잡담", r"이야기", r"얘기", r"대화", r"소통",
-                    r"discussion", r"talk", r"chat", r"conversation", r"story",
-                    r"생각", r"의견", r"느낌", r"느껴", r"생각해"
-                ]
-            }
-            self.topic_categories = {
-                "phishing": "피싱",
-                "identity_theft": "신원 도용",
-                "fraud": "사기",
-                "other": "기타"
-            }
-            self.topic_patterns = {
-                "phishing": [
-                    r"phishing", r"피싱", r"사기", r"scam", r"fraud", r"속임수", r"속인주소", r"속인메일", r"속인전화"
-                ],
-                "identity_theft": [
-                    r"identity_theft", r"신원도용", r"신원탈취", r"신원사칭", r"신원조작", r"신원변조"
-                ],
-                "fraud": [
-                    r"fraud", r"사기", r"scam", r"속임수", r"속인주소", r"속인메일", r"속인전화"
-                ],
-                "other": [
-                    r"other", r"기타", r"기타사기", r"기타사칭", r"기타속임수", r"기타속인주소", r"기타속인메일", r"기타속인전화"
-                ]
-            }
-            self.method_categories = {
-                "email": "이메일",
-                "sms": "SMS",
-                "phone": "전화",
-                "website": "웹사이트",
-                "app": "앱",
-                "other": "기타"
-            }
-            self.method_patterns = {
-                "email": [
-                    r"email", r"이메일", r"메일", r"메일주소", r"메일주소입력", r"메일주소입력필드", r"메일주소입력필드입력"
-                ],
-                "sms": [
-                    r"sms", r"sms메시지", r"sms메시지입력", r"sms메시지입력필드", r"sms메시지입력필드입력"
-                ],
-                "phone": [
-                    r"phone", r"전화", r"전화번호", r"전화번호입력", r"전화번호입력필드", r"전화번호입력필드입력"
-                ],
-                "website": [
-                    r"website", r"웹사이트", r"웹사이트주소", r"웹사이트주소입력", r"웹사이트주소입력필드", r"웹사이트주소입력필드입력"
-                ],
-                "app": [
-                    r"app", r"앱", r"앱설치", r"앱다운로드", r"앱다운로드필드", r"앱다운로드필드입력"
-                ],
-                "other": [
-                    r"other", r"기타", r"기타방법", r"기타방식", r"기타수단", r"기타수단사용"
-                ]
-            }
+            # 기본값 설정 - YAML에서 읽어오므로 빈 딕셔너리로 설정
+            self.type_categories = {}
+            self.type_patterns = {}
+            self.topic_categories = {}
+            self.topic_patterns = {}
+            self.method_categories = {}
+            self.method_patterns = {}
 
     def classify_with_keywords(self, text: str, patterns_dict: dict, default: str = "other", multi: bool = False) -> tuple:
         """
@@ -160,7 +83,7 @@ class TextClassifier:
         """
         타입 분류 (confidence 포함)
         """
-        return self.classify_with_keywords(text, self.type_patterns, default="discussion")
+        return self.classify_with_keywords(text, self.type_patterns, default="unclear")
 
     def classify_topic(self, text: str) -> tuple:
         """
@@ -207,8 +130,9 @@ class TextClassifier:
 
         try:
             result = self.local_classifier(text, candidate_labels, multi_label=False)
-            labels = result.get("labels", [])
-            type_label = next((type_label_map[lbl] for lbl in labels if lbl in type_label_map), "other")
+            labels = result["labels"] if isinstance(result, dict) else []
+            scores = result["scores"] if isinstance(result, dict) else []
+            type_label = next((type_label_map[lbl] for lbl in labels if lbl in type_label_map), "unclear")
             topic_label = next((topic_label_map[lbl] for lbl in labels if lbl in topic_label_map), "other")
             method_label = next((method_label_map[lbl] for lbl in labels if lbl in method_label_map), "")
             return {
@@ -223,21 +147,6 @@ class TextClassifier:
                 "scam_topic": "API_TIMEOUT",
                 "scam_method": "API_TIMEOUT"
             }
-
-def classify_with_keywords_simple(text, patterns_dict, default="other", multi=False):
-    if not text or pd.isna(text):
-        return default
-    text = str(text).lower()
-    matched = []
-    for category, patterns in patterns_dict.items():
-        for pattern in patterns:
-            if pattern.lower() in text:
-                matched.append(category)
-                if not multi:
-                    return category  # 첫 매칭 카테고리 반환
-    if multi and matched:
-        return "+".join(sorted(set(matched)))
-    return default
 
 def process_csv_file(input_file: str, output_file: str, api_token: Optional[str] = None, use_api: bool = False, config: Optional[dict] = None):
     """
@@ -285,7 +194,7 @@ def process_csv_file(input_file: str, output_file: str, api_token: Optional[str]
     matched_method_keywords = []
     
     output_exists = os.path.exists(output_file)
-    for idx, row in df.iterrows():
+    for idx, (_, row) in enumerate(df.iterrows()):
         # 기존 파일이 있고, 현재 행이 이미 분류되어 있는지 확인
         if existing_df is not None:
             existing_row = existing_df[existing_df['id'] == row['id']]
@@ -411,15 +320,27 @@ def main():
             output_basename = input_basename.replace(".csv", "_classified.csv")
         output_file = os.path.join(os.path.dirname(input_file), output_basename)
     config_file = os.path.join(project_root, "config.yaml")
+    config_secret_file = os.path.join(project_root, "config_secret.yaml")
     
-    # config.yaml에서 API 토큰 읽기
+    # config.yaml에서 기본 설정 읽기
     try:
         with open(config_file, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
-        api_token = config.get('huggingface_api_key')
     except Exception as e:
         print(f"config.yaml 읽기 실패: {e}")
-        api_token = None
+        config = {}
+    
+    # config_secret.yaml에서 민감한 정보 읽기
+    try:
+        with open(config_secret_file, 'r', encoding='utf-8') as f:
+            config_secret = yaml.safe_load(f)
+        # 민감한 정보를 기본 설정에 병합
+        if config_secret:
+            config.update(config_secret)
+    except Exception as e:
+        print(f"config_secret.yaml 읽기 실패: {e}")
+    
+    api_token = config.get('huggingface_api_key')
     
     # API 사용 여부 (토큰이 없으면 False로 설정)
     use_api = False if not api_token else True

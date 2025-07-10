@@ -11,8 +11,25 @@ CONFIG_PATH = 'config.yaml'
 
 # config 읽기
 def load_config():
-    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-        return yaml.safe_load(f)
+    # 기본 설정 파일 읽기
+    try:
+        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+    except Exception as e:
+        print(f"config.yaml 읽기 실패: {e}")
+        config = {}
+    
+    # 민감한 정보 파일 읽기
+    try:
+        with open('config_secret.yaml', 'r', encoding='utf-8') as f:
+            config_secret = yaml.safe_load(f)
+        # 민감한 정보를 기본 설정에 병합
+        if config_secret:
+            config.update(config_secret)
+    except Exception as e:
+        print(f"config_secret.yaml 읽기 실패: {e}")
+    
+    return config
 
 def get_post_ids(data_path):
     if not os.path.exists(data_path):
@@ -20,14 +37,14 @@ def get_post_ids(data_path):
     df = pd.read_csv(data_path, encoding='euc-kr')
     return set(df['id'].astype(str))
 
-def save_posts(posts):
+def save_posts(posts, data_path):
     df = pd.DataFrame(posts)
-    if os.path.exists(DATA_PATH):
-        df_old = pd.read_csv(DATA_PATH, encoding='euc-kr')
+    if os.path.exists(data_path):
+        df_old = pd.read_csv(data_path, encoding='euc-kr')
         df = pd.concat([df_old, df], ignore_index=True)
         df = df.drop_duplicates(subset=['id'])
-    os.makedirs(os.path.dirname(DATA_PATH), exist_ok=True)
-    df.to_csv(DATA_PATH, index=False, encoding='euc-kr', errors='ignore')
+    os.makedirs(os.path.dirname(data_path), exist_ok=True)
+    df.to_csv(data_path, index=False, encoding='euc-kr', errors='ignore')
 
 def get_post_content(post_url):
     try:
@@ -118,7 +135,7 @@ def crawl_posts(config):
             page += 1
             time.sleep(1)  # 페이지당 딜레이
     if all_new_posts:
-        save_posts(all_new_posts)
+        save_posts(all_new_posts, data_path)
     else:
         print("[INFO] No new posts found.")
 

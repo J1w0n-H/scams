@@ -16,8 +16,25 @@ import re
 
 # config 읽기
 def load_config():
-    with open('config.yaml', 'r', encoding='utf-8-sig') as f:
-        return yaml.safe_load(f)
+    # 기본 설정 파일 읽기
+    try:
+        with open('config.yaml', 'r', encoding='utf-8-sig') as f:
+            config = yaml.safe_load(f)
+    except Exception as e:
+        print(f"config.yaml 읽기 실패: {e}")
+        config = {}
+    
+    # 민감한 정보 파일 읽기
+    try:
+        with open('config_secret.yaml', 'r', encoding='utf-8-sig') as f:
+            config_secret = yaml.safe_load(f)
+        # 민감한 정보를 기본 설정에 병합
+        if config_secret:
+            config.update(config_secret)
+    except Exception as e:
+        print(f"config_secret.yaml 읽기 실패: {e}")
+    
+    return config
 
 def get_post_ids(data_path):
     if not os.path.exists(data_path):
