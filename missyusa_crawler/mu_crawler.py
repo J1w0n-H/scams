@@ -1,13 +1,18 @@
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 import pandas as pd
 import yaml
 import os
 import time
 from datetime import datetime
 import urllib.parse
+import sys
 
 CONFIG_PATH = 'config.yaml'
+
+def get_output_path(input_path, suffix):
+    base, ext = os.path.splitext(input_path)
+    return f"{base}{suffix}{ext}"
 
 # config 읽기
 def load_config():
@@ -39,8 +44,17 @@ def get_post_ids(data_path):
 
 def save_posts(posts, data_path):
     df = pd.DataFrame(posts)
+    # 오늘 날짜를 id에 'date:YYYY-MM-DD'로 추가 (최상단에)
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    date_row = {col: '' for col in df.columns}
+    if 'id' in date_row:
+        date_row['id'] = f'date:{today_str}'
+    df = pd.concat([pd.DataFrame([date_row]), df], ignore_index=True)
     if os.path.exists(data_path):
         df_old = pd.read_csv(data_path, encoding='euc-kr')
+        # 기존 파일에서 첫 행이 id가 'date:'로 시작하면 제거
+        if 'id' in df_old.columns and str(df_old.iloc[0].get('id', '')).startswith('date:'):
+            df_old = df_old.iloc[1:]
         df = pd.concat([df_old, df], ignore_index=True)
         df = df.drop_duplicates(subset=['id'])
     os.makedirs(os.path.dirname(data_path), exist_ok=True)
@@ -57,19 +71,27 @@ def get_post_content(post_url):
         resp.encoding = 'euc-kr'
         soup = BeautifulSoup(resp.text, 'html.parser')
         content_div = soup.select_one('div.detail_content')
+        # 본문 텍스트
+        content = content_div.get_text("\n", strip=True) if content_div else ''
+        # 이미지 URL 추출
+        image_urls = []
         if content_div:
-            return content_div.get_text("\n", strip=True)
-        else:
-            return ''
+            for img in content_div.find_all('img'):
+                if isinstance(img, Tag):
+                    src = img.get('src')
+                    if src and src not in image_urls:
+                        image_urls.append(src)
+        if not image_urls:
+            image_urls = ['없음']
+        return content, image_urls
     except Exception as e:
         print(f"[ERROR] Failed to fetch content from {post_url}: {e}")
-        return ''
+        return '', ['없음']
 
-def crawl_posts(config):
-    data_path = config['missyusa']['data_path']
+def crawl_posts(config, data_path):
     existing_ids = get_post_ids(data_path)
     all_new_posts = []
-    for keyword in config['missyusa']['keywords']:
+    for keyword in config['keywords']:
         page = 1
         while True:
             encoded_keyword = urllib.parse.quote(keyword, encoding='euc-kr')
@@ -99,12 +121,15 @@ def crawl_posts(config):
             post_links = []
             seen = set()
             for td in soup.find_all('td', attrs={'align': 'left'}):
-                a = td.find('a', href=True)
-                if a and 'board_read.asp' in a['href']:
-                    href = a['href']
-                    if href not in seen:
-                        seen.add(href)
-                        post_links.append(a)
+                if not isinstance(td, Tag):
+                    continue
+                for a in td.find_all('a', href=True):
+                    if isinstance(a, Tag):
+                        href = a.get('href')
+                        href_str = str(href) if href is not None else ''
+                        if href_str and 'board_read.asp' in href_str and href_str not in seen:
+                            seen.add(href_str)
+                            post_links.append(a)
             print(f"[DEBUG] Found {len(post_links)} post links on page {page}")
 
             if not post_links:
@@ -112,18 +137,22 @@ def crawl_posts(config):
 
             new_posts = []
             for a in post_links:
-                href = a['href']
-                post_id = href.split('idx=')[-1].split('&')[0]
-                if post_id in existing_ids:
+                if not isinstance(a, Tag):
                     continue
-                post_url = 'https://www.missyusa.com' + href if href.startswith('/') else href
+                href = a.get('href')
+                href_str = str(href) if href is not None else ''
+                post_id = href_str.split('idx=')[-1].split('&')[0] if href_str else ''
+                if not href_str or post_id in existing_ids:
+                    continue
+                post_url = 'https://www.missyusa.com' + href_str if href_str.startswith('/') else href_str
                 title = a.get_text(strip=True)
-                content = get_post_content(post_url)
+                content, image_urls = get_post_content(post_url)
                 new_posts.append({
                     'id': post_id,
                     'url': post_url,
                     'title': title,
                     'content': content,
+                    'image_urls': ','.join(image_urls),
                     'keyword': keyword,
                     'crawled_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 })
@@ -140,12 +169,23 @@ def crawl_posts(config):
         print("[INFO] No new posts found.")
 
 def main():
+    args = sys.argv[1:]
     config = load_config()
+    if len(args) >= 1:
+        data_path = args[0]
+    else:
+        data_path = config.get('missyusa', {}).get('data_path', 'data/mu_posts.csv')
+    os.makedirs(os.path.dirname(data_path), exist_ok=True)
+    # 파일이 없으면 빈 파일 생성
+    if not os.path.exists(data_path):
+        columns = ['id', 'title', 'content', 'image_urls', 'url', 'keyword', 'crawled_at']
+        pd.DataFrame({col: [] for col in columns}).to_csv(data_path, index=False, encoding='euc-kr')
+    print(f"[INFO] 데이터 저장 경로: {data_path}")
     while True:
         print(f"[INFO] Crawling at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        crawl_posts(config)
-        print(f"[INFO] Sleeping for {config['missyusa']['interval_minutes']} minutes...")
-        time.sleep(config['missyusa']['interval_minutes'] * 60)
+        crawl_posts(config, data_path)
+        print(f"[INFO] Sleeping for {config['interval_minutes']} minutes...")
+        time.sleep(config['interval_minutes'] * 60)
 
 if __name__ == '__main__':
     main() 

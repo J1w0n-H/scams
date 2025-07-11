@@ -13,6 +13,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import urllib.parse
 import re
+import sys
 
 # config 읽기
 def load_config():
@@ -36,6 +37,10 @@ def load_config():
     
     return config
 
+def get_output_path(input_path, suffix):
+    base, ext = os.path.splitext(input_path)
+    return f"{base}{suffix}{ext}"
+
 def get_post_ids(data_path):
     if not os.path.exists(data_path):
         return set()
@@ -53,32 +58,31 @@ def get_post_ids_and_contents(data_path):
 
 def save_posts(posts, data_path):
     df_new = pd.DataFrame(posts)
+    # 오늘 날짜를 id에 'date:YYYY-MM-DD'로 추가 (최상단에)
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    date_row = {col: '' for col in df_new.columns}
+    if 'id' in date_row:
+        date_row['id'] = f'date:{today_str}'
+    df_new = pd.concat([pd.DataFrame([date_row]), df_new], ignore_index=True)
     if os.path.exists(data_path):
         df_old = pd.read_csv(data_path, encoding='utf-8-sig')
+        # 기존 파일에서 첫 행이 id가 'date:'로 시작하면 제거
+        if not df_old.empty and 'id' in df_old.columns and str(df_old.iloc[0].get('id', '')).startswith('date:'):
+            df_old = df_old.iloc[1:]
         df_old.set_index('id', inplace=True)
         df_new.set_index('id', inplace=True)
         for idx, row in df_new.iterrows():
             if idx in df_old.index:
-                old_content = str(df_old.at[idx, 'content']).strip()
-                new_content = str(row['content']).strip()
-                # 기존 본문이 빈칸이고, 새 본문이 있으면 업데이트
-                if (not old_content) and new_content:
-                    for col in df_new.columns:
-                        df_old.at[idx, col] = row[col]
-                # 기존 본문이 있고, 새 본문이 더 길면 업데이트
-                elif old_content and new_content and len(new_content) > len(old_content):
-                    for col in df_new.columns:
-                        df_old.at[idx, col] = row[col]
-                # 기존 본문과 새 본문이 다르고, 새 본문이 더 짧으면 합치기
-                elif old_content and new_content and old_content != new_content and len(new_content) <= len(old_content):
-                    merged_content = old_content
-                    if new_content not in old_content:
-                        merged_content += "\n" + new_content
-                    df_old.at[idx, 'content'] = merged_content
+                for col in df_new.columns:
+                    old_val = str(df_old.at[idx, col]) if col in df_new.columns else ''
+                    new_val = str(row[col])
+                    if (not old_val or old_val.strip() == '' or old_val == 'nan') and new_val and new_val.strip() != '' and new_val != 'nan':
+                        df_old.at[idx, col] = new_val
             else:
-                # 기존에 없는 id는 추가
                 df_old.loc[idx] = row
         df = df_old.reset_index()
+        # 최상단에 날짜 행 추가
+        df = pd.concat([pd.DataFrame([date_row]), df], ignore_index=True)
     else:
         df = df_new.reset_index()
     os.makedirs(os.path.dirname(data_path), exist_ok=True)
@@ -370,12 +374,13 @@ def get_post_content_and_images(driver, post_url):
             src = img.get_attribute('src')
             if src and src not in image_urls:
                 image_urls.append(src)
-
+    # 이미지가 없으면 '없음'으로 표시
+    if not image_urls:
+        image_urls = ['없음']
     return content, image_urls
 
-def crawl_posts(config):
+def crawl_posts(config, data_path):
     """게시글 크롤링 메인 함수"""
-    data_path = config['naver']['data_path']
     id_content_map = get_post_ids_and_contents(data_path)
     
     # Chrome 옵션 설정
@@ -429,12 +434,24 @@ def crawl_posts(config):
                     if not article_id_match:
                         continue
                     post_id = article_id_match.group(1)
-                    # 이미 수집된 게시글이라도 content가 비어있으면 다시 크롤링
-                    if post_id in id_content_map and str(id_content_map[post_id]).strip() != '':
-                        print(f"[DEBUG] 이미 수집된 게시글(본문 있음) 건너뜀: {post_id}")
+                    # 이미 수집된 게시글이라도 content가 비어있거나 image_urls가 비어있으면 다시 크롤링
+                    content_exists = post_id in id_content_map and str(id_content_map[post_id]).strip() != ''
+                    # 기존에 저장된 이미지 정보 확인 (data_path에서 image_urls 컬럼 읽기)
+                    image_exists = False
+                    df_check = pd.read_csv(data_path, encoding='utf-8-sig')
+                    if 'id' in df_check.columns and 'image_urls' in df_check.columns:
+                        row = df_check[df_check['id'].astype(str) == str(post_id)]
+                        if not row.empty:
+                            image_urls_val = str(row.iloc[0]['image_urls'])
+                            if image_urls_val and image_urls_val.strip() != '' and image_urls_val != 'nan':
+                                image_exists = True
+                        else:
+                            image_urls_val = ''  # 기본값
+                    if content_exists and image_exists:
+                        print(f"[DEBUG] 이미 수집된 게시글(본문/이미지 있음) 건너뜀: {post_id}")
                         continue
-                    elif post_id in id_content_map:
-                        print(f"[DEBUG] 이미 수집된 게시글(본문 비어있음) 재수집: {post_id}")
+                    elif content_exists or image_exists:
+                        print(f"[DEBUG] 이미 수집된 게시글(본문 또는 이미지 비어있음) 재수집: {post_id}")
                     title = element.text.strip()
                     if not title:
                         continue
@@ -566,11 +583,25 @@ def crawl_posts(config):
             driver.quit()
 
 def main():
-    """메인 함수"""
+    # config 및 인자 처리
+    args = sys.argv[1:]
     config = load_config()
+    # 오늘 날짜 (월일) 구하기
+    today_str = datetime.now().strftime('%m%d')
+    if len(args) >= 1:
+        data_path = args[0]
+    else:
+        data_path = config.get('naver', {}).get('data_path', 'data/gu_posts.csv')
+    os.makedirs(os.path.dirname(data_path), exist_ok=True)
+    # 파일이 없을 때 posts 컬럼명에 맞는 헤더만 있는 빈 CSV를 생성하도록 main 함수에서 처리. (encoding='utf-8-sig')
+    if not os.path.exists(data_path):
+        columns = ['id', 'title', 'content', 'image_urls', 'url', 'keyword', 'crawled_at']
+        import pandas as pd
+        pd.DataFrame({col: [] for col in columns}).to_csv(data_path, index=False, encoding='utf-8-sig')
+    print(f"[INFO] 데이터 저장 경로: {data_path}")
     while True:
         print(f"[INFO] Crawling at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        crawl_posts(config)
+        crawl_posts(config, data_path)
         print(f"[INFO] Sleeping for {config['interval_minutes']} minutes...")
         time.sleep(config['interval_minutes'] * 60)
 

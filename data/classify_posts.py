@@ -9,6 +9,10 @@ import os
 import sys
 from transformers.pipelines import pipeline
 
+def get_output_path(input_path, suffix):
+    base, ext = os.path.splitext(input_path)
+    return f"{base}{suffix}{ext}"
+
 class TextClassifier:
     def __init__(self, api_token: Optional[str] = None, config: Optional[dict] = None):
         """
@@ -118,6 +122,7 @@ class TextClassifier:
         result = self.local_classifier(text, candidate_labels, multi_label=True)
         labels = result["labels"] if isinstance(result, dict) else []
         scores = result["scores"] if isinstance(result, dict) else []
+        label_score_dict = dict(zip(labels, scores))
 
         # label_map: value(한글) → key(영문)
         type_label_map = {v: k for k, v in self.scam_type_categories.items()}
@@ -188,7 +193,7 @@ class TextClassifier:
             "matched_scam_type_score": api_result["scam_type_score"] if type_matched == 0 and api_result else None,
             "matched_scam_topic_score": api_result["scam_topic_score"] if topic_matched == 0 and api_result else None,
             "matched_scam_method_score": api_result["scam_method_score"] if method_matched == 0 and api_result else None
-        }
+            }
 
 def process_csv_file(input_file: str, output_file: str, api_token: Optional[str] = None, use_api: bool = False, config: Optional[dict] = None):
     """
@@ -237,6 +242,14 @@ def process_csv_file(input_file: str, output_file: str, api_token: Optional[str]
     
     output_exists = os.path.exists(output_file)
     for idx, (_, row) in enumerate(df.iterrows()):
+        if str(row.get('id', '')).startswith('date:'):
+            classifications_scam_type.append("")
+            classifications_scam_topic.append("")
+            classifications_scam_method.append("")
+            matched_scam_type_keywords.append("")
+            matched_scam_topic_keywords.append("")
+            matched_scam_method_keywords.append("")
+            continue
         # 기존 파일이 있고, 현재 행이 이미 분류되어 있는지 확인
         should_reclassify = True
         if existing_df is not None:
@@ -257,10 +270,9 @@ def process_csv_file(input_file: str, output_file: str, api_token: Optional[str]
                     matched_scam_topic_keywords.append(existing_row.iloc[0].get('matched_scam_topic_keyword', ''))
                     matched_scam_method_keywords.append(existing_row.iloc[0].get('matched_scam_method_keyword', ''))
                     should_reclassify = False
-                    continue
-                else:
-                    print(f"ID {row['id']}: 기존 분류가 fallback 값(unclear/unknown/빈값)이므로 재분류합니다.")
-        
+                continue
+            else:
+                print(f"ID {row['id']}: 기존 분류가 fallback 값(unclear/unknown/빈값)이므로 재분류합니다.")
         if should_reclassify:
             # 제목과 내용을 결합하여 분류
             title = str(row.get('title', ''))
@@ -287,30 +299,30 @@ def process_csv_file(input_file: str, output_file: str, api_token: Optional[str]
             matched_scam_type_keywords.append(result.get('matched_scam_type_keyword', ''))
             matched_scam_topic_keywords.append(result.get('matched_scam_topic_keyword', ''))
             matched_scam_method_keywords.append(result.get('matched_scam_method_keyword', ''))
-            # 진행상황 출력
-            if (idx + 1) % 10 == 0:
-                print(f"진행률: {idx + 1}/{len(df)} ({((idx + 1)/len(df)*100):.1f}%)")
-            # API 사용 시 요청 간격 조절
-            if use_api:
-                time.sleep(0.5)  # 0.5초 대기
-            result_row = dict(row)  # 원본 row의 모든 컬럼 포함
-            result_row.update({
+        # 진행상황 출력
+        if (idx + 1) % 10 == 0:
+            print(f"진행률: {idx + 1}/{len(df)} ({((idx + 1)/len(df)*100):.1f}%)")
+        # API 사용 시 요청 간격 조절
+        if use_api:
+            time.sleep(0.5)  # 0.5초 대기
+        result_row = dict(row)  # 원본 row의 모든 컬럼 포함
+        result_row.update({
                 "scam_type": result['scam_type'],
-                "scam_topic": result['scam_topic'],
-                "scam_method": result['scam_method'],
+            "scam_topic": result['scam_topic'],
+            "scam_method": result['scam_method'],
                 "matched_scam_type_keyword": result.get('matched_scam_type_keyword', ''),
                 "matched_scam_topic_keyword": result.get('matched_scam_topic_keyword', ''),
                 "matched_scam_method_keyword": result.get('matched_scam_method_keyword', '')
-            })
-            result_df = pd.DataFrame([result_row])
-            result_df.to_csv(
-                output_file,
-                mode='a',
-                header=not output_exists and idx == 0,  # 첫 행만 헤더
-                index=False,
-                encoding='utf-8-sig'
-            )
-            output_exists = True
+        })
+        result_df = pd.DataFrame([result_row])
+        result_df.to_csv(
+            output_file,
+            mode='a',
+            header=not output_exists and idx == 0,  # 첫 행만 헤더
+            index=False,
+            encoding='utf-8-sig'
+        )
+        output_exists = True
     
     # 분류 결과를 데이터프레임에 추가
     df['scam_type'] = classifications_scam_type
@@ -342,68 +354,46 @@ def main():
     
     # 커맨드라인 인자 처리
     args = sys.argv[1:]
-    def resolve_path(arg, default_name):
-        if os.path.isabs(arg):
-            return arg
-        # data/로 시작하는 경우 워크스페이스 루트 기준으로 처리
-        if arg.startswith('data' + os.sep) or arg.startswith('data/'):
-            return os.path.join(project_root, arg)
-        # ./data/로 시작하는 경우도 처리
-        if arg.startswith('.' + os.sep + 'data' + os.sep) or arg.startswith('./data/'):
-            return os.path.join(project_root, arg[2:])  # ./ 제거
-        # 그 외의 경우 스크립트 디렉토리 기준으로 처리
-        return os.path.join(script_dir, arg)
-    if len(args) >= 1:
-        input_file = resolve_path(args[0], "gu_posts_translated.csv")
-    else:
-        input_file = os.path.join(script_dir, "gu_posts_translated.csv")
-    if len(args) >= 2:
-        output_file = resolve_path(args[1], "gu_posts_classified.csv")
-    else:
-        # 입력 파일명에서 _translated를 _classified로 변경
-        input_basename = os.path.basename(input_file)
-        if "_translated.csv" in input_basename:
-            output_basename = input_basename.replace("_translated.csv", "_classified.csv")
-        else:
-            output_basename = input_basename.replace(".csv", "_classified.csv")
-        output_file = os.path.join(os.path.dirname(input_file), output_basename)
-    config_file = os.path.join(project_root, "config.yaml")
-    config_secret_file = os.path.join(project_root, "config_secret.yaml")
-    
     # config.yaml에서 기본 설정 읽기
     try:
-        with open(config_file, 'r', encoding='utf-8') as f:
+        with open(os.path.join(project_root, "config.yaml"), 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
     except Exception as e:
         print(f"config.yaml 읽기 실패: {e}")
         config = {}
-    
+    # 입력 파일: 인자 > config > 기본값
+    if len(args) >= 1:
+        input_file = args[0]
+    else:
+        input_file = config.get('naver', {}).get('data_path', os.path.join(script_dir, "gu_posts.csv"))
+    # 출력 파일: 인자 > 자동 생성
+    if len(args) >= 2:
+        output_file = args[1]
+    else:
+        # 입력 파일명에서 _translated를 _classified로 변경
+        if "_translated" in input_file:
+            output_file = get_output_path(input_file.replace("_translated", ""), "_classified")
+        else:
+            output_file = get_output_path(input_file, "_classified")
+    config_secret_file = os.path.join(project_root, "config_secret.yaml")
     # config_secret.yaml에서 민감한 정보 읽기
     try:
         with open(config_secret_file, 'r', encoding='utf-8') as f:
             config_secret = yaml.safe_load(f)
-        # 민감한 정보를 기본 설정에 병합
         if config_secret:
             config.update(config_secret)
     except Exception as e:
         print(f"config_secret.yaml 읽기 실패: {e}")
-    
     api_token = config.get('huggingface_api_key')
-    
-    # API 사용 여부 (토큰이 없으면 False로 설정)
     use_api = False if not api_token else True
-    
     print("=== 텍스트 분류 시작 ===")
     print(f"입력 파일: {input_file}")
     print(f"출력 파일: {output_file}")
     print(f"API 사용: {use_api}")
-    
     if use_api:
         print("Hugging Face API를 사용하여 분류합니다...")
     else:
         print("키워드 기반 분류를 사용합니다...")
-    
-    # CSV 파일 처리
     process_csv_file(input_file, output_file, api_token, use_api, config)
 
 if __name__ == "__main__":
